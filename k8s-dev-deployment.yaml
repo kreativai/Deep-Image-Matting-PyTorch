@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dev-detectron-worker
+spec:
+  selector:
+    matchLabels:
+      manage: dev-detectron-worker
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: dev-detectron-worker
+        manage: dev-detectron-worker
+    spec:
+      tolerations:
+        - key: "accelerator-name"
+          operator: "Exists"
+          effect: "NoSchedule"
+        - key: "accelerator-type"
+          operator: "Equal"
+          value: "inference"
+          effect: "NoSchedule"
+        - key: "preemptible"
+          operator: "Equal"
+          value: "no"
+          effect: "NoSchedule"
+      restartPolicy: Always
+      volumes:
+      - name: filestore
+        persistentVolumeClaim:
+          claimName: stylegan-filestore
+      containers:
+      - name: dev-detectron-worker
+        image: "gcr.io/aivision-app/detectron"
+        imagePullPolicy: Always
+        resources:
+          limits:
+            nvidia.com/gpu: 1
+        volumeMounts:
+          - name: filestore
+            mountPath: /weights
+            subPath: weights
+        ports:
+        - containerPort: 5000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dev-detectron-endpoints
+spec:
+  type: ClusterIP
+  selector:
+    app: dev-detectron-worker
+  ports:
+  - protocol: TCP # because bare k8s does not know about HTTP
+    name: http # so that Istio knows how to handle it
+    port: 5000
+    targetPort: 5000
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: DestinationRule
+metadata:
+  name: dev-detectron-endpoints
+spec:
+  host: dev-detectron-endpoints
+  trafficPolicy:
+    loadBalancer:
+      simple: LEAST_CONN
